@@ -2,6 +2,26 @@
    КОНФИГ И СОСТОЯНИЕ
    ============================================================ */
 const API = '/api';
+
+/* ==== ФИНАЛЬНАЯ ЗАЩИТА ОТ АВТО-МОДАЛКИ ==== */
+(function(){
+    window.__authModalAllowedUntil = 0;
+    // Разрешаем открытие только по явному клику
+    document.addEventListener('click', function(e){
+        var t = e.target;
+        while (t) {
+            var oc = t.getAttribute && t.getAttribute('onclick');
+            if (oc && oc.indexOf('openAuthModal') !== -1) {
+                window.__authModalAllowedUntil = Date.now() + 800;
+                return;
+            }
+            t = t.parentNode;
+        }
+    }, true);
+})();
+/* ==== КОНЕЦ ЗАЩИТЫ ==== */
+
+
 let authToken = localStorage.getItem('vs_token') || '';
 let currentUser = null;
 let products = [];
@@ -126,7 +146,7 @@ async function showBrands() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 async function showMyOrders() {
-    if (!currentUser) { openAuthModal(); return; }
+    if (!currentUser) { showToast('Войдите в аккаунт', 'info'); return; }
     hideAllViews();
     myOrdersView.classList.add('active');
     const box = document.getElementById('my-orders-content');
@@ -247,15 +267,14 @@ function productCardHtml(p) {
     if (Array.isArray(p.badges) && p.badges.length) {
         badgesHtml = '<div class="product-badges">' +
             p.badges.map(function(b) {
-                const _ic = window.badgeIconHtml ? window.badgeIconHtml(b.icon, 13) : '';
-                return '<span class="badge-item" style="background:' + (b.color || '#111') + ';color:' + (b.text_color || '#fff') + ';">' + _ic + '<span>' + (b.label || '') + '</span></span>';
+                return '<span class="badge-item" style="background:' + (b.color || '#111') + ';color:' + (b.text_color || '#fff') + ';">' + (b.label || '') + '</span>';
             }).join('') + '</div>';
     }
 
     let stockLine = '';
     if (status === 'coming_soon') stockLine = '<div class="stock-line soon">Скоро в наличии</div>';
     else if (status === 'out_of_stock' || stock === 0) stockLine = '<div class="stock-line out">Нет в наличии</div>';
-    else stockLine = '<div class="stock-line in">В наличии: ' + stock + ' шт.</div>';
+    else stockLine = '<div class="stock-line in">В наличии: <span class="stock-num">' + stock + '</span> шт</div>';
 
     return '<div class="product-card" onclick="openProduct(' + p.id + ')">' +
         badgesHtml +
@@ -265,8 +284,8 @@ function productCardHtml(p) {
             (hasDiscount ? '<span class="price-old">' + p.price.toLocaleString('ru-RU') + ' ₽</span>' : '') +
             '<span class="' + (hasDiscount ? 'price-new' : '') + '">' + finalPrice.toLocaleString('ru-RU') + ' ₽</span>' +
         '</div>' +
-        stockLine +
         '<button class="btn" onclick="event.stopPropagation();openProduct(' + p.id + ')">Подробнее</button>' +
+        stockLine +
     '</div>';
 }
 function renderProducts() {
@@ -312,7 +331,7 @@ function openProduct(id) {
         const stock = currentProduct.stock || 0;
         const status = currentProduct.stock_status || 'in_stock';
         if (status === 'coming_soon') stockEl.innerHTML = '<span style="color:#8b0000;">Скоро в наличии</span>';
-        else if (stock > 0) stockEl.innerHTML = '<span style="color:#2d7a2d;">В наличии: ' + stock + ' шт.</span>';
+        else if (stock > 0) stockEl.innerHTML = '<span style="color:#2d7a2d;">В наличии: ' + stock + ' шт</span>';
         else stockEl.innerHTML = '<span style="color:#999;">Нет в наличии</span>';
     }
 
@@ -370,6 +389,39 @@ function updateCartCount() {
     cartCount = cart.reduce(function(s, i) { return s + i.qty; }, 0);
     if (cartCountElement) cartCountElement.textContent = cartCount;
 }
+
+async function reserveCurrentProduct() {
+    if (!currentProduct) return;
+    if (!currentUser) {
+        showToast('Чтобы забронировать, войдите в аккаунт', 'info');
+        return;
+    }
+    const phoneEl = document.getElementById('o-phone');
+    const addressEl = document.getElementById('o-address');
+    if (!phoneEl || !addressEl || !phoneEl.value.trim() || !addressEl.value.trim()) {
+        showToast('Заполните телефон и адрес в корзине', 'error');
+        return;
+    }
+    try {
+        await api('/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+                customer_name: phoneEl.value.trim(),
+                phone: phoneEl.value.trim(),
+                address: addressEl.value.trim(),
+                comment: 'Бронь товара',
+                items: [{ id: currentProduct.id, name: currentProduct.name, price: currentProduct.final_price || currentProduct.price, size: currentSize, qty: 1 }],
+                total: currentProduct.final_price || currentProduct.price,
+                is_reserved: true,
+                payment_status: 'unpaid'
+            })
+        });
+        showSuccessPage('Товар забронирован! Следите за статусом в «Мои заказы». Когда товар появится в наличии, админ сообщит вам.');
+    } catch (e) {
+        showToast('Ошибка брони: ' + e.message, 'error');
+    }
+}
+
 function addCurrentToCart() {
     if (!currentProduct) return;
     const key = currentProduct.id + '|' + currentSize;
@@ -437,7 +489,6 @@ function renderCart() {
 async function checkout(paymentMethod) {
     if (!currentUser) {
         showToast('Чтобы оформить заказ, войдите в аккаунт', 'info');
-        openAuthModal();
         return;
     }
     const phoneEl = document.getElementById('o-phone');
@@ -552,6 +603,10 @@ function renderUserArea() {
     }
 }
 function openAuthModal() {
+    if (Date.now() > (window.__authModalAllowedUntil || 0)) {
+        console.log('[guard] авто-модалка заблокирована');
+        return;
+    }
     document.getElementById('auth-modal').classList.add('active');
     switchAuthForm('login');
 }
@@ -959,17 +1014,30 @@ function renderAdminOrders() {
     const tbody = document.getElementById('admin-orders-body');
     if (!tbody) return;
     if (orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">Заказов нет</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">Заказов нет</td></tr>';
         return;
     }
+    const paymentLabels = {
+        unpaid: 'Не оплачен',
+        paid_card: 'Оплачен картой',
+        paid_cash: 'Оплачен наличными',
+        refund: 'Возврат'
+    };
     tbody.innerHTML = orders.map(function(o) {
+        const pm = o.payment_status || 'unpaid';
+        const isReserved = o.is_reserved === 1;
         return '<tr>' +
-            '<td>' + o.id + '</td>' +
+            '<td>' + o.id + (isReserved ? '<br><span style="color:#8b0000;font-size:10px;">БРОНЬ</span>' : '') + '</td>' +
             '<td>' + (o.customer_name || o.phone || '—') + '</td>' +
             '<td>' + (o.phone || '—') + '</td>' +
             '<td>' + (o.address || '—') + '</td>' +
             '<td>' + (o.items || []).map(function(i) { return i.name + ' (' + i.size + ') ×' + i.qty; }).join('<br>') + '</td>' +
             '<td>' + (o.total || 0).toLocaleString('ru-RU') + ' ₽</td>' +
+            '<td><select onchange="updatePaymentStatus(' + o.id + ', this.value)">' +
+                Object.keys(paymentLabels).map(function(k) {
+                    return '<option value="' + k + '" ' + (k === pm ? 'selected' : '') + '>' + paymentLabels[k] + '</option>';
+                }).join('') +
+            '</select></td>' +
             '<td><select onchange="updateOrderStatus(' + o.id + ', this.value)">' +
                 ['new','processing','shipped','done','cancelled'].map(function(s) {
                     return '<option value="' + s + '" ' + (s === o.status ? 'selected' : '') + '>' + ORDER_STATUS_LABELS[s] + '</option>';
@@ -977,6 +1045,13 @@ function renderAdminOrders() {
             '</select></td>' +
         '</tr>';
     }).join('');
+}
+
+async function updatePaymentStatus(id, payment_status) {
+    try {
+        await api('/orders/' + id + '/payment', { method: 'PUT', body: JSON.stringify({ payment_status: payment_status }) });
+        showToast('Статус оплаты обновлён', 'success');
+    } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
 }
 async function updateOrderStatus(id, status) {
     try { await api('/orders/' + id, { method: 'PUT', body: JSON.stringify({ status: status }) }); }
@@ -1804,7 +1879,7 @@ window.toggleChat = async function(force){
 };
 
 window.openChatForOrder = function(orderId){
-  if (!currentUser){ openAuthModal(); return; }
+  if (!currentUser) { showToast('Войдите в аккаунт', 'info'); return; }
   toggleChat(true);
 };
 
@@ -2192,7 +2267,7 @@ window.renderChatMsg = renderChatMsg;
   }
 
   async function doSendClient(text){
-    if (!chatState.chatId) { try { await loadMyChat(); } catch(e){} }
+    /* авто-загрузка чата убрана */
     if (!chatState.chatId) { showToast('Чат не найден', 'error'); return; }
     try {
       const msg = await api('/chats/' + chatState.chatId + '/messages', {
@@ -2370,3 +2445,88 @@ setInterval(function(){
     window.__forceAdminChatsOff = true;
   }
 })();
+
+
+/* ============================================================
+   ПРЕЛОАДЕР
+   ============================================================ */
+/* старый прелоадер убран */
+
+
+/* ============================================================
+   ПРЕЛОАДЕР — печатная машинка
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', function() {
+    const preloader = document.getElementById('preloader');
+    const titleEl = document.getElementById('preloader-title');
+    const cursorEl = document.getElementById('preloader-cursor');
+    if (!preloader || !titleEl) return;
+
+    const text = 'VAMP MARIUPOL';
+    let i = 0;
+    const speed = 90; // миллисекунд на символ
+
+    function typeChar() {
+        if (i < text.length) {
+            titleEl.textContent += text.charAt(i);
+            i++;
+            setTimeout(typeChar, speed);
+        } else {
+            // Закончили печатать — через 1 сек начинаем скрывать
+            setTimeout(function() {
+                if (cursorEl) cursorEl.style.display = 'none';
+                preloader.classList.add('hide');
+                setTimeout(function() { preloader.remove(); }, 900);
+            }, 1000);
+        }
+    }
+
+    // Начинаем печатать через 300 мс после загрузки
+    setTimeout(typeChar, 300);
+});
+
+
+/* ============================================================
+   НАСТРОЙКИ: БРОНИРОВАНИЕ
+   ============================================================ */
+let reserveEnabled = true;
+
+async function loadReserveSetting() {
+    try {
+        const data = await api('/settings/reserve');
+        reserveEnabled = !!data.enabled;
+        const toggle = document.getElementById('reserve-toggle');
+        if (toggle) toggle.checked = reserveEnabled;
+        const status = document.getElementById('reserve-status');
+        if (status) status.textContent = reserveEnabled ? 'Бронирование включено' : 'Бронирование выключено';
+        updateReserveButtonVisibility();
+    } catch (e) { console.error('settings load:', e); }
+}
+
+async function toggleReserve(enabled) {
+    try {
+        await api('/settings/reserve', { method: 'PUT', body: JSON.stringify({ enabled: enabled }) });
+        reserveEnabled = enabled;
+        const status = document.getElementById('reserve-status');
+        if (status) status.textContent = enabled ? 'Бронирование включено' : 'Бронирование выключено';
+        showToast(enabled ? 'Бронирование включено' : 'Бронирование выключено', 'success');
+        updateReserveButtonVisibility();
+    } catch (e) { showToast('Ошибка: ' + e.message, 'error'); }
+}
+
+function updateReserveButtonVisibility() {
+    const btn = document.querySelector('.reserve-btn');
+    if (btn) btn.style.display = reserveEnabled ? 'block' : 'none';
+}
+
+// Подгружаем настройку при старте
+document.addEventListener('DOMContentLoaded', function() {
+    loadReserveSetting();
+});
+
+
+
+
+
+
+

@@ -829,7 +829,7 @@ app.delete('/api/slides/:id', authMiddleware, adminMiddleware, (req, res) => {
    ЗАКАЗЫ
    ============================================================ */
 app.post('/api/orders', authMiddleware, (req, res) => {
-    const { customer_name, phone, address, comment, items, total } = req.body;
+    const { customer_name, phone, address, comment, items, total, payment_method, payment_status, is_reserved, stock_eta } = req.body;
     if (!customer_name || !phone || !address) return res.status(400).json({ error: 'Заполните имя, телефон и адрес' });
     if (!items || !items.length) return res.status(400).json({ error: 'Корзина пуста' });
     // Обогащаем каждый item картинкой и брендом из products
@@ -854,9 +854,9 @@ app.post('/api/orders', authMiddleware, (req, res) => {
         } catch(e){}
         return it;
     });
-    const r = db.prepare(`INSERT INTO orders (user_id, customer_name, phone, address, comment, items, total, status)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, 'new')`)
-                .run(req.user.id, customer_name, phone, address, comment || '', JSON.stringify(enrichedItems), total || 0);
+    const r = db.prepare(`INSERT INTO orders (user_id, customer_name, phone, address, comment, items, total, status, payment_method, payment_status, is_reserved, stock_eta)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(req.user.id, customer_name, phone, address, comment || '', JSON.stringify(enrichedItems), total || 0, is_reserved ? 'reserved' : 'new', payment_method || 'cash', payment_status || 'unpaid', is_reserved ? 1 : 0, stock_eta || null);
     res.json({ id: r.lastInsertRowid, ok: true });
 });
 app.get('/api/orders/my', authMiddleware, (req, res) => {
@@ -897,9 +897,59 @@ app.put('/api/orders/:id', authMiddleware, adminMiddleware, (req, res) => {
     res.json({ ok: true });
 });
 
+
+app.put('/api/orders/:id/payment', authMiddleware, adminMiddleware, (req, res) => {
+    const { payment_status } = req.body;
+    if (!payment_status) return res.status(400).json({ error: 'Статус оплаты обязателен' });
+    db.prepare('UPDATE orders SET payment_status = ? WHERE id = ?').run(payment_status, req.params.id);
+    res.json({ ok: true });
+});
+
+
+/* ============================================================
+   НАСТРОЙКИ: БРОНИРОВАНИЕ
+   ============================================================ */
+app.get('/api/settings/reserve', (req, res) => {
+    try {
+        const row = db.prepare("SELECT value FROM settings WHERE key = 'reserve_enabled'").get();
+        res.json({ enabled: row && row.value === '1' });
+    } catch (e) { res.json({ enabled: false }); }
+});
+
+app.put('/api/settings/reserve', authMiddleware, adminMiddleware, (req, res) => {
+    const { enabled } = req.body;
+    try {
+        db.prepare("INSERT INTO settings (key, value) VALUES ('reserve_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = ?").run(enabled ? '1' : '0', enabled ? '1' : '0');
+        res.json({ ok: true, enabled: !!enabled });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ============================================================
    КОНТАКТЫ
    ============================================================ */
+
+/* ЮKASSA */
+app.post('/api/payment/create', authMiddleware, async (req, res) => {
+  const { items, total, payment_method, phone, address, comment } = req.body;
+  if (!items || !items.length) return res.status(400).json({ error: "Корзина пуста" });
+  if (!phone || !address) return res.status(400).json({ error: "Заполните телефон и адрес" });
+  if (payment_method === "cash") {
+    const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "cash");
+    return res.json({ order_id: r.lastInsertRowid, paid: false, method: "cash" });
+  }
+  if (!YOOKASSA_SECRET_KEY) return res.status(400).json({ error: "ЮKassa не настроена" });
+  try {
+    const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "online");
+    const auth = Buffer.from(YOOKASSA_SHOP_ID + ":" + YOOKASSA_SECRET_KEY).toString("base64");
+    const body = { amount: { value: (total || 0).toFixed(2), currency: "RUB" }, capture: true, confirmation: { type: "redirect", return_url: "http://vampshmot.ru/#order_" + r.lastInsertRowid }, description: "Заказ №" + r.lastInsertRowid };
+    const yoo = await fetch("https://api.yookassa.ru/v3/payments", { method: "POST", headers: { "Authorization": "Basic " + auth, "Idempotence-Key": "order_" + r.lastInsertRowid + "_" + Date.now(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await yoo.json();
+    if (!yoo.ok) return res.status(400).json({ error: d.description || "Ошибка ЮKassa" });
+    db.prepare("UPDATE orders SET payment_id = ? WHERE id = ?").run(d.id, r.lastInsertRowid);
+    res.json({ order_id: r.lastInsertRowid, confirmation_url: d.confirmation.confirmation_url, method: "online" });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/contacts', (req, res) => {
     const c = db.prepare('SELECT * FROM contacts WHERE id = 1').get();
     res.json(c || {});
@@ -927,6 +977,58 @@ app.use((err, req, res, next) => {
 /* * ============================================================
    SPA
    ============================================================ */
+
+/* ============================================================
+   ЮKASSA: ВЕБХУК (автоматическая смена статуса оплаты)
+   ============================================================ */
+app.post('/api/payment/webhook', (req, res) => {
+    // Всегда отвечаем 200, иначе ЮKassa будет повторять запрос
+    try {
+        const event = req.body || {};
+        console.log('[webhook] ' + (event.event || 'unknown'));
+
+        if (event.event === 'payment.succeeded' && event.object) {
+            const paymentId = event.object.id;
+            const meta = event.object.metadata || {};
+            let orderId = meta.order_id ? parseInt(meta.order_id) : null;
+
+            // Если order_id не пришёл в metadata — ищем заказ по payment_id
+            if (!orderId) {
+                const row = db.prepare('SELECT id FROM orders WHERE payment_id = ?').get(paymentId);
+                if (row) orderId = row.id;
+            }
+
+            if (orderId) {
+                db.prepare("UPDATE orders SET payment_status = 'paid_card', status = 'processing', paid = 1 WHERE id = ?").run(orderId);
+                console.log('[webhook] Заказ №' + orderId + ' оплачен картой');
+            } else {
+                console.log('[webhook] Заказ не найден для payment_id=' + paymentId);
+            }
+        }
+
+        if (event.event === 'payment.canceled' && event.object) {
+            const paymentId = event.object.id;
+            const row = db.prepare('SELECT id FROM orders WHERE payment_id = ?').get(paymentId);
+            if (row) {
+                db.prepare("UPDATE orders SET payment_status = 'unpaid', status = 'cancelled' WHERE id = ?").run(row.id);
+                console.log('[webhook] Заказ №' + row.id + ' отменён');
+            }
+        }
+
+        if (event.event === 'refund.succeeded' && event.object) {
+            const paymentId = event.object.payment_id;
+            const row = db.prepare('SELECT id FROM orders WHERE payment_id = ?').get(paymentId);
+            if (row) {
+                db.prepare("UPDATE orders SET payment_status = 'refund' WHERE id = ?").run(row.id);
+                console.log('[webhook] Возврат по заказу №' + row.id);
+            }
+        }
+    } catch (e) {
+        console.error('[webhook] error:', e.message);
+    }
+    res.json({ ok: true });
+});
+
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

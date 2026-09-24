@@ -11,3 +11,10 @@ yarn-error.log*
 # ОС
 .DS_Store
 Thumbs.db
+
+# Приватное — не заливать в Git
+database.db
+database.db-journal
+.env
+uploads/
+*.log

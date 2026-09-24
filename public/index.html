@@ -7,6 +7,27 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="preloader"><div class="preloader-content"><div class="preloader-title" id="preloader-title"></div><div class="preloader-cursor" id="preloader-cursor">|</div></div></div>
+
+
+
+
+
+
+        
+    </div>
+</div>
+
+
+        
+        
+    </div>
+</div>
+
+
+</div>
+
+
 
 <!-- Уведомления -->
 <div id="toast-container"></div>
@@ -53,7 +74,7 @@
         </div>
         <div class="hero-content">
             <h1>Vamp Shmot</h1>
-            <p>Одежда от российских дизайнеров. Уникальные вещи, честные цены, доставка по всей стране.</p>
+            <p>Одежда от независимых дизайнеров. Уникальные вещи, честные цены, доставка по всей стране.</p>
             <button class="btn" onclick="document.querySelector('.catalog').scrollIntoView({behavior:'smooth'})">Смотреть коллекцию</button>
         </div>
     </section>
@@ -147,6 +168,7 @@
                 </div>
             </div>
             <button class="add-to-cart-btn" onclick="addCurrentToCart()">Добавить в корзину</button>
+            <button class="reserve-btn" onclick="reserveCurrentProduct()">Забронировать</button>
         </div>
     </div>
 
@@ -232,6 +254,7 @@
         <button class="admin-tab" onclick="switchAdminTab('slider',this)">Слайдер</button>
         <button class="admin-tab" onclick="switchAdminTab('orders',this)">Заказы</button>
         <button class="admin-tab" onclick="switchAdminTab('contacts',this)">Контакты</button>
+        <button class="admin-tab" onclick="switchAdminTab('settings',this)">Настройки</button>
         <button class="admin-tab" onclick="switchAdminTab('users',this)">Пользователи</button>
         <button class="admin-tab" onclick="switchAdminTab('chats',this)">Чаты <span id="admin-chat-badge" style="display:none;background:#8b0000;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;margin-left:4px;"></span></button>
     </div>
@@ -390,7 +413,7 @@
 
     <div class="admin-section" id="admin-orders">
         <table class="admin-table">
-            <thead><tr><th>ID</th><th>Клиент</th><th>Телефон</th><th>Адрес</th><th>Товары</th><th>Сумма</th><th>Статус</th></tr></thead>
+            <thead><tr><th>ID</th><th>Клиент</th><th>Телефон</th><th>Адрес</th><th>Товары</th><th>Сумма</th><th>Оплата</th><th>Статус</th></tr></thead>
             <tbody id="admin-orders-body"></tbody>
         </table>
     </div>
@@ -410,6 +433,26 @@
                 <div class="form-group"><label>Часы работы</label><input type="text" id="c-hours"></div>
             </div>
             <button class="btn" onclick="saveContacts()">Сохранить</button>
+        </div>
+    </div>
+
+
+    <div class="admin-section" id="admin-settings">
+        <div class="admin-form" style="max-width: 100%;">
+            <h3>Настройки магазина</h3>
+
+            <div class="setting-row">
+                <div>
+                    <div class="setting-title">Бронирование товаров</div>
+                    <div class="setting-desc">Если включено — на странице товара появится кнопка «Забронировать». Покупатели смогут забронировать товар, а вы — сообщить, когда он будет в наличии.</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="reserve-toggle" onchange="toggleReserve(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="setting-status" id="reserve-status">Загрузка...</div>
         </div>
     </div>
 
