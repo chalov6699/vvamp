@@ -96,47 +96,19 @@ function showSuccessPage(text) {
    API
    ============================================================ */
 async function api(path, options) {
-    const opts = Object.assign({ headers: {} }, options || {});
-    opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-    if (typeof authToken !== 'undefined' && authToken) {
-        opts.headers['Authorization'] = 'Bearer ' + authToken;
-    }
-
-    let res;
-    try {
-        res = await fetch(API + path, opts);
-    } catch (e) {
-        throw new Error('Ошибка сети: ' + e.message);
-    }
-
-    // Читаем как текст один раз
-    const text = await res.text();
-
-    // Пробуем распарсить JSON
-    let data;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error('Некорректный JSON от сервера');
-        }
-    } else {
-        // Сервер вернул НЕ JSON — это ошибка
-        if (!res.ok) {
-            throw new Error('Ошибка сервера (' + res.status + ')');
-        }
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error('Ожидался JSON, пришёл другой формат (' + ct + ')');
-        }
-    }
-
+    options = options || {};
+    const opts = {
+        headers: Object.assign({ 'Content-Type': 'application/json' }, options.headers || {}),
+    };
+    Object.keys(options).forEach(function(k) { opts[k] = options[k]; });
+    if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
+    const res = await fetch(API + path, opts);
     if (!res.ok) {
-        throw new Error((data && data.error) || ('HTTP ' + res.status));
+        let err = 'Ошибка';
+        try { err = (await res.json()).error || err; } catch (e) {}
+        throw new Error(err);
     }
-    return data;
+    return res.json();
 }
 
 /* ============================================================
@@ -150,7 +122,6 @@ function hideAllViews() {
     views.forEach(function(v) { if (v) v.classList.remove('active'); });
 }
 function showCatalog() {
-    document.body.classList.remove("success-active");
     hideAllViews();
     mainView.style.display = 'block';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -373,25 +344,9 @@ function openProduct(id) {
         brandEl.style.display = 'none';
     }
     renderProductGallery();
-    (function(){
-        var sizes = currentProduct.sizes || [];
-        var firstAvailable = null;
-        sizes.forEach(function(sz){
-            if (firstAvailable === null && window.isSizeAvailable(currentProduct, sz)) firstAvailable = sz;
-        });
-        if (firstAvailable && !window.isSizeAvailable(currentProduct, currentSize)) {
-            currentSize = firstAvailable;
-        }
-        document.getElementById('pv-sizes').innerHTML = sizes.map(function(size){
-            var available = window.isSizeAvailable(currentProduct, size);
-            var cls = 'size-btn' + ((size === currentSize && available) ? ' selected' : '') + (!available ? ' size-out' : '');
-            var dis = !available ? ' disabled' : '';
-            var ttl = !available ? ' title="Нет в наличии"' : '';
-            var onclick = available ? ' onclick="selectSize(\'' + size + '\',this)"' : '';
-            var label = size;
-            return '<button class="' + cls + '"' + dis + ttl + onclick + '>' + label + '</button>';
-        }).join('');
-    })();
+    document.getElementById('pv-sizes').innerHTML = (currentProduct.sizes || []).map(function(size) {
+        return '<button class="size-btn ' + (size === currentSize ? 'selected' : '') + '" onclick="selectSize(\'' + size + '\',this)">' + size + '</button>';
+    }).join('');
     hideAllViews();
     productView.classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -637,7 +592,7 @@ function renderUserArea() {
     if (currentUser) {
         const adminBtn = currentUser.role === 'admin'
             ? '<button class="user-btn admin-btn" onclick="openAdmin()">Админка</button>' : '';
-        area.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+        area.innerHTML = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
             '<div class="user-info">Привет, <strong>' + currentUser.name + '</strong></div>' +
             '<button class="user-btn" onclick="showMyOrders()">Мои заказы</button>' +
             adminBtn +
@@ -852,7 +807,6 @@ async function saveProduct() {
     const discount = discountEl ? (parseInt(discountEl.value) || 0) : 0;
     const desc = document.getElementById('f-desc').value.trim();
     const sizesStr = document.getElementById('f-sizes').value.trim();
-    var _collectSBS = (window.collectStockBySize && window.collectStockBySize()) || {};
     const brand_id = document.getElementById('f-brand').value || null;
     const category_id = document.getElementById('f-category').value || null;
     const stockEl = document.getElementById('f-stock');
@@ -868,7 +822,7 @@ async function saveProduct() {
     const sku = skuEl ? skuEl.value.trim() : '';
     const specs = collectSpecs();
     const payload = {
-        name: name, price: price, description: desc, sizes: sizes, images: images, stock_by_size: _collectSBS,
+        name: name, price: price, description: desc, sizes: sizes, images: images,
         brand_id: brand_id ? parseInt(brand_id) : null,
         category_id: category_id ? parseInt(category_id) : null,
         discount: discount,
@@ -894,7 +848,6 @@ function editProduct(id) {
     if (discountEl) discountEl.value = p.discount || 0;
     document.getElementById('f-desc').value = p.description || '';
     document.getElementById('f-sizes').value = (p.sizes || []).join(', ');
-    if (window.renderStockBySizeGrid) window.renderStockBySizeGrid(p.sizes || [], p.stock_by_size || {});
     document.getElementById('form-title').textContent = 'Редактирование: ' + p.name;
     currentPhotos = (p.images || []).slice();
     renderProductPhotos();
@@ -2661,75 +2614,3 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 console.log('[vamp] stock-by-size grid ready');
-
-/* ============================================================
-   Страница успешного платежа — обработка возврата с ЮKassa
-   Авто-скрытие через 6 секунд + очистка hash
-   ============================================================ */
-(function(){
-  var AUTO_HIDE_MS = 6000; // 6 секунд
-  var hideTimer = null;
-
-  function hideSuccess(){
-    var sv = document.getElementById('success-view');
-    if (sv) {
-      sv.classList.remove('active');
-      sv.style.display = '';
-    }
-    document.body.classList.remove('success-active');
-
-    // Убираем #order_X из URL, не перезагружая страницу
-    if (window.location.hash && /^#order_\d+$/.test(window.location.hash)) {
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-
-    // Показать каталог
-    if (typeof showCatalog === 'function') {
-      try { showCatalog(); } catch (e) {}
-    }
-
-    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    console.log('[success] страница скрыта');
-  }
-
-  function showSuccess(hash){
-    var m = hash && hash.match(/^#order_(\d+)$/);
-    if (!m) return false;
-    var orderId = m[1];
-
-    // Скрываем все view
-    var views = document.querySelectorAll('.view, main, #main-view, #product-view, #success-view, #admin-view, #my-orders-view');
-    views.forEach(function(v){ if (v && v.classList) v.classList.remove('active'); });
-
-    var sv = document.getElementById('success-view');
-    if (sv) {
-      sv.classList.add('active');
-      sv.style.display = 'block';
-    }
-    document.body.classList.add('success-active');
-    document.body.classList.remove('modal-open');
-
-    var txt = document.getElementById('success-text');
-    if (txt) txt.textContent = 'Заказ №' + orderId + ' успешно оплачен. Мы свяжемся с вами для подтверждения.';
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    console.log('[success] показан заказ #' + orderId + ' — скроется через ' + (AUTO_HIDE_MS/1000) + ' сек');
-
-    // Авто-скрытие
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(hideSuccess, AUTO_HIDE_MS);
-    return true;
-  }
-
-  window.__hideSuccess = hideSuccess; // для кнопки "Вернуться в каталог"
-
-  function checkHash(){ showSuccess(window.location.hash); }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', checkHash);
-  } else {
-    setTimeout(checkHash, 500);
-  }
-
-  window.addEventListener('hashchange', checkHash);
-})();

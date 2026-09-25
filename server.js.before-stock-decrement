@@ -936,7 +936,6 @@ app.post('/api/payment/create', authMiddleware, async (req, res) => {
   if (!phone || !address) return res.status(400).json({ error: "Заполните телефон и адрес" });
   if (payment_method === "cash") {
     const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "cash");
-    decrementStock(r.lastInsertRowid);
     return res.json({ order_id: r.lastInsertRowid, paid: false, method: "cash" });
   }
   if (!YOOKASSA_SECRET_KEY) return res.status(400).json({ error: "ЮKassa не настроена" });
@@ -983,53 +982,6 @@ app.use((err, req, res, next) => {
 /* ============================================================
    ЮKASSA: ВЕБХУК (автоматическая смена статуса оплаты)
    ============================================================ */
-
-/* ============================================================
-   decrementStock(orderId) — уменьшает сток товаров из заказа
-   ============================================================ */
-function decrementStock(orderId) {
-  try {
-    const order = db.prepare('SELECT items, stock_decremented FROM orders WHERE id = ?').get(orderId);
-    if (!order) { console.log('[stock] Заказ #' + orderId + ' не найден'); return; }
-    if (order.stock_decremented) { console.log('[stock] Заказ #' + orderId + ' уже вычитан'); return; }
-
-    let items = [];
-    try { items = JSON.parse(order.items || '[]'); } catch (e) { items = []; }
-    if (!items.length) { console.log('[stock] Заказ #' + orderId + ' без товаров'); return; }
-
-    let changed = 0;
-    for (const it of items) {
-      const pid = it.id;
-      const qty = parseInt(it.qty || 1, 10);
-      const size = it.size;
-      if (!pid || !qty) continue;
-
-      const prod = db.prepare('SELECT id, stock, stock_by_size FROM products WHERE id = ?').get(pid);
-      if (!prod) { console.log('[stock] Товар #' + pid + ' не найден'); continue; }
-
-      // Уменьшаем общий stock (не ниже 0)
-      const newStock = Math.max(0, (prod.stock || 0) - qty);
-
-      // Уменьшаем stock_by_size
-      let sbs = {};
-      try { sbs = JSON.parse(prod.stock_by_size || '{}'); } catch (e) { sbs = {}; }
-      if (size && sbs[size] !== undefined) {
-        sbs[size] = Math.max(0, (parseInt(sbs[size], 10) || 0) - qty);
-      }
-
-      db.prepare('UPDATE products SET stock = ?, stock_by_size = ? WHERE id = ?')
-        .run(newStock, JSON.stringify(sbs), pid);
-      changed++;
-      console.log('[stock] Товар #' + pid + ' (' + (size || '-') + '): ' + (prod.stock || 0) + ' -> ' + newStock);
-    }
-
-    db.prepare('UPDATE orders SET stock_decremented = 1 WHERE id = ?').run(orderId);
-    console.log('[stock] Заказ #' + orderId + ': уменьшено ' + changed + ' поз.');
-  } catch (e) {
-    console.error('[stock] Ошибка в decrementStock:', e.message);
-  }
-}
-
 app.post('/api/payment/webhook', (req, res) => {
     // Всегда отвечаем 200, иначе ЮKassa будет повторять запрос
     try {

@@ -18,3 +18,13 @@ database.db-journal
 .env
 uploads/
 *.log
+.env
+.env
+database.db
+database.db.bak*
+uploads/
+*.bak
+*.bak-*
+*.manual_bak
+*.snapshot-*
+vamp4.snapshot-*

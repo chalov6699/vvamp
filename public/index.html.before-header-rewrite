@@ -44,7 +44,7 @@
         </div>
         <h2>Заказ оформлен!</h2>
         <p id="success-text">Мы свяжемся с вами для подтверждения.</p>
-        <button class="btn" onclick="if(window.__hideSuccess){window.__hideSuccess();}else{showCatalog()}">Вернуться в каталог</button>
+        <button class="btn" onclick="showCatalog()">Вернуться в каталог</button>
     </div>
 </section>
 
@@ -52,15 +52,13 @@
     <div class="logo" onclick="showCatalog()">
         <img src="img/vamp.png" alt="Logo">
     </div>
-
-    <nav class="main-nav">
+    <nav>
         <ul>
             <li><a onclick="showCatalog()">Каталог</a></li>
             <li><a onclick="showBrands()">Бренды</a></li>
             <li><a onclick="showContacts()">Контакты</a></li>
         </ul>
     </nav>
-
     <div class="header-right">
         <div id="user-area"></div>
         <div class="cart-icon" onclick="showCart()">🛒<span class="cart-count" id="cart-count">0</span></div>

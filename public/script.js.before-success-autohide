@@ -2664,40 +2664,15 @@ console.log('[vamp] stock-by-size grid ready');
 
 /* ============================================================
    Страница успешного платежа — обработка возврата с ЮKassa
-   Авто-скрытие через 6 секунд + очистка hash
    ============================================================ */
 (function(){
-  var AUTO_HIDE_MS = 6000; // 6 секунд
-  var hideTimer = null;
-
-  function hideSuccess(){
-    var sv = document.getElementById('success-view');
-    if (sv) {
-      sv.classList.remove('active');
-      sv.style.display = '';
-    }
-    document.body.classList.remove('success-active');
-
-    // Убираем #order_X из URL, не перезагружая страницу
-    if (window.location.hash && /^#order_\d+$/.test(window.location.hash)) {
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-
-    // Показать каталог
-    if (typeof showCatalog === 'function') {
-      try { showCatalog(); } catch (e) {}
-    }
-
-    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    console.log('[success] страница скрыта');
-  }
-
   function showSuccess(hash){
+    // hash вида #order_123
     var m = hash && hash.match(/^#order_(\d+)$/);
     if (!m) return false;
     var orderId = m[1];
 
-    // Скрываем все view
+    // Скрываем все view, показываем success
     var views = document.querySelectorAll('.view, main, #main-view, #product-view, #success-view, #admin-view, #my-orders-view');
     views.forEach(function(v){ if (v && v.classList) v.classList.remove('active'); });
 
@@ -2712,24 +2687,21 @@ console.log('[vamp] stock-by-size grid ready');
     var txt = document.getElementById('success-text');
     if (txt) txt.textContent = 'Заказ №' + orderId + ' успешно оплачен. Мы свяжемся с вами для подтверждения.';
 
+    // Прокрутить наверх
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    console.log('[success] показан заказ #' + orderId + ' — скроется через ' + (AUTO_HIDE_MS/1000) + ' сек');
-
-    // Авто-скрытие
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(hideSuccess, AUTO_HIDE_MS);
+    console.log('[success] показан заказ #' + orderId);
     return true;
   }
 
-  window.__hideSuccess = hideSuccess; // для кнопки "Вернуться в каталог"
-
+  // При загрузке страницы — если hash есть, показать success
   function checkHash(){ showSuccess(window.location.hash); }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', checkHash);
   } else {
-    setTimeout(checkHash, 500);
+    setTimeout(checkHash, 500); // небольшая задержка, чтобы другие скрипты прогрузились
   }
 
+  // При изменении hash (редко, но бывает)
   window.addEventListener('hashchange', checkHash);
 })();

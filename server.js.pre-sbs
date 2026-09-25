@@ -250,7 +250,7 @@ try {
 {
     const count = db.prepare('SELECT COUNT(*) as c FROM products').get().c;
     if (count === 0) {
-        const insert = db.prepare('INSERT INTO products (name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, stock_by_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const insert = db.prepare('INSERT INTO products (name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         const defaults = [
             { name: "Кожаный плащ Ночная тень", price: 25000, description: "Длинный кожаный плащ.", sizes: ["S","M","L","XL"], images: ["https://images.unsplash.com/photo-1551028719-00167b16eac5?w=1200"], brand: 1, cat: 1, disc: 0 },
             { name: "Чокер с шипами", price: 3500, description: "Кожаный чокер.", sizes: ["ONE SIZE"], images: ["https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=1200"], brand: 1, cat: 10, disc: 10 },
@@ -483,7 +483,6 @@ function enrichProduct(p) {
     try {
         p.images = JSON.parse(p.images || '[]');
         p.sizes = JSON.parse(p.sizes || '[]');
-        p.stock_by_size = JSON.parse(p.stock_by_size || '{}');
         p.specs = JSON.parse(p.specs || '[]');
     } catch { p.images = []; p.sizes = []; }
     p.img = p.images[0] || '';
@@ -581,24 +580,24 @@ app.get('/api/products/:id', (req, res) => {
 });
 
 app.post('/api/products', authMiddleware, adminMiddleware, (req, res) => {
-    const { name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, badge_ids, stock_by_size } = req.body;
+    const { name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, badge_ids } = req.body;
     if (!name || !price) return res.status(400).json({ error: 'Название и цена обязательны' });
     if (!images || !images.length) return res.status(400).json({ error: 'Добавьте фото' });
     const r = db.prepare('INSERT INTO products (name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                .run(name, price, description || '', JSON.stringify(sizes || ['ONE SIZE']), JSON.stringify(images), brand_id || null, category_id || null, discount || 0, stock || 0, stock_status || 'in_stock', JSON.stringify(stock_by_size || {}));
+                .run(name, price, description || '', JSON.stringify(sizes || ['ONE SIZE']), JSON.stringify(images), brand_id || null, category_id || null, discount || 0, stock || 0, stock_status || 'in_stock');
     const newId = r.lastInsertRowid;
     try { if (badge_ids && badge_ids.length) { const stmt = db.prepare('INSERT OR IGNORE INTO product_badges (product_id, badge_id) VALUES (?, ?)'); for (const bid of badge_ids) stmt.run(newId, bid); } } catch (e) { console.error('badges insert:', e.message); }
     res.json(enrichProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(newId)));
 });
 
 app.put('/api/products/:id', authMiddleware, adminMiddleware, (req, res) => {
-    const { name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, badge_ids, sku, specs, stock_by_size } = req.body;
+    const { name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, badge_ids, sku, specs } = req.body;
     const existing = db.prepare('SELECT id, sku FROM products WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Не найден' });
     let finalSku = (sku || '').trim();
     if (!finalSku) finalSku = existing.sku || generateSku(name, category_id);
-    db.prepare('UPDATE products SET name = ?, price = ?, description = ?, sizes = ?, images = ?, brand_id = ?, category_id = ?, discount = ?, stock = ?, stock_status = ?, sku = ?, specs = ?, stock_by_size = ? WHERE id = ?')
-      .run(name, price, description || '', JSON.stringify(sizes || ['ONE SIZE']), JSON.stringify(images || []), brand_id || null, category_id || null, discount || 0, stock || 0, stock_status || 'in_stock', finalSku, JSON.stringify(specs || []), JSON.stringify(stock_by_size || {}), req.params.id);
+    db.prepare('UPDATE products SET name = ?, price = ?, description = ?, sizes = ?, images = ?, brand_id = ?, category_id = ?, discount = ?, stock = ?, stock_status = ?, sku = ?, specs = ? WHERE id = ?')
+      .run(name, price, description || '', JSON.stringify(sizes || ['ONE SIZE']), JSON.stringify(images || []), brand_id || null, category_id || null, discount || 0, stock || 0, stock_status || 'in_stock', finalSku, JSON.stringify(specs || []), req.params.id);
     try { db.prepare('DELETE FROM product_badges WHERE product_id = ?').run(req.params.id); if (badge_ids && badge_ids.length) { const stmt = db.prepare('INSERT OR IGNORE INTO product_badges (product_id, badge_id) VALUES (?, ?)'); for (const bid of badge_ids) stmt.run(req.params.id, bid); } } catch (e) { console.error('badges update:', e.message); }
     res.json(enrichProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)));
 });
@@ -936,14 +935,13 @@ app.post('/api/payment/create', authMiddleware, async (req, res) => {
   if (!phone || !address) return res.status(400).json({ error: "Заполните телефон и адрес" });
   if (payment_method === "cash") {
     const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "cash");
-    decrementStock(r.lastInsertRowid);
     return res.json({ order_id: r.lastInsertRowid, paid: false, method: "cash" });
   }
   if (!YOOKASSA_SECRET_KEY) return res.status(400).json({ error: "ЮKassa не настроена" });
   try {
     const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "online");
     const auth = Buffer.from(YOOKASSA_SHOP_ID + ":" + YOOKASSA_SECRET_KEY).toString("base64");
-    const body = { amount: { value: (total || 0).toFixed(2), currency: "RUB" }, capture: true, confirmation: { type: "redirect", return_url: "https://vampshmot.ru/#order_" + r.lastInsertRowid }, description: "Заказ №" + r.lastInsertRowid };
+    const body = { amount: { value: (total || 0).toFixed(2), currency: "RUB" }, capture: true, confirmation: { type: "redirect", return_url: "http://vampshmot.ru/#order_" + r.lastInsertRowid }, description: "Заказ №" + r.lastInsertRowid };
     const yoo = await fetch("https://api.yookassa.ru/v3/payments", { method: "POST", headers: { "Authorization": "Basic " + auth, "Idempotence-Key": "order_" + r.lastInsertRowid + "_" + Date.now(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const d = await yoo.json();
     if (!yoo.ok) return res.status(400).json({ error: d.description || "Ошибка ЮKassa" });
@@ -983,53 +981,6 @@ app.use((err, req, res, next) => {
 /* ============================================================
    ЮKASSA: ВЕБХУК (автоматическая смена статуса оплаты)
    ============================================================ */
-
-/* ============================================================
-   decrementStock(orderId) — уменьшает сток товаров из заказа
-   ============================================================ */
-function decrementStock(orderId) {
-  try {
-    const order = db.prepare('SELECT items, stock_decremented FROM orders WHERE id = ?').get(orderId);
-    if (!order) { console.log('[stock] Заказ #' + orderId + ' не найден'); return; }
-    if (order.stock_decremented) { console.log('[stock] Заказ #' + orderId + ' уже вычитан'); return; }
-
-    let items = [];
-    try { items = JSON.parse(order.items || '[]'); } catch (e) { items = []; }
-    if (!items.length) { console.log('[stock] Заказ #' + orderId + ' без товаров'); return; }
-
-    let changed = 0;
-    for (const it of items) {
-      const pid = it.id;
-      const qty = parseInt(it.qty || 1, 10);
-      const size = it.size;
-      if (!pid || !qty) continue;
-
-      const prod = db.prepare('SELECT id, stock, stock_by_size FROM products WHERE id = ?').get(pid);
-      if (!prod) { console.log('[stock] Товар #' + pid + ' не найден'); continue; }
-
-      // Уменьшаем общий stock (не ниже 0)
-      const newStock = Math.max(0, (prod.stock || 0) - qty);
-
-      // Уменьшаем stock_by_size
-      let sbs = {};
-      try { sbs = JSON.parse(prod.stock_by_size || '{}'); } catch (e) { sbs = {}; }
-      if (size && sbs[size] !== undefined) {
-        sbs[size] = Math.max(0, (parseInt(sbs[size], 10) || 0) - qty);
-      }
-
-      db.prepare('UPDATE products SET stock = ?, stock_by_size = ? WHERE id = ?')
-        .run(newStock, JSON.stringify(sbs), pid);
-      changed++;
-      console.log('[stock] Товар #' + pid + ' (' + (size || '-') + '): ' + (prod.stock || 0) + ' -> ' + newStock);
-    }
-
-    db.prepare('UPDATE orders SET stock_decremented = 1 WHERE id = ?').run(orderId);
-    console.log('[stock] Заказ #' + orderId + ': уменьшено ' + changed + ' поз.');
-  } catch (e) {
-    console.error('[stock] Ошибка в decrementStock:', e.message);
-  }
-}
-
 app.post('/api/payment/webhook', (req, res) => {
     // Всегда отвечаем 200, иначе ЮKassa будет повторять запрос
     try {
