@@ -25,6 +25,9 @@ const { DatabaseSync } = require('node:sqlite');
     }
 })();
 
+/* Запускаем бота ПОСЛЕ загрузки .env */
+const bot = require('./bot');
+
 const app = express();
 function generateSku(name, categoryId) {
     // префикс: 2-4 буквы из категории или из названия
@@ -62,6 +65,49 @@ if (!process.env.JWT_SECRET) {
 }
 
 const db = new DatabaseSync(path.join(__dirname, 'database.db'));
+
+/* ============================================================
+   Валидация полей (бэкенд)
+   ============================================================ */
+function isValidEmail(v) {
+    if (!v || typeof v !== 'string') return false;
+    v = v.trim();
+    if (v.length < 5 || v.length > 254) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+}
+
+function isValidPhoneRU(v) {
+    if (!v || typeof v !== 'string') return false;
+    const digits = v.replace(/\D/g, '');
+    // 11 цифр: 7XXXXXXXXXX или 8XXXXXXXXXX, либо 10 цифр (без 7/8)
+    if (digits.length === 11) {
+        return (digits[0] === '7' || digits[0] === '8') && /^[78]\d{10}$/.test(digits);
+    }
+    if (digits.length === 10) {
+        return /^\d{10}$/.test(digits);
+    }
+    return false;
+}
+
+function isValidName(v) {
+    if (!v || typeof v !== 'string') return false;
+    v = v.trim();
+    if (v.length < 2 || v.length > 50) return false;
+    return /^[А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z\s\-]{1,49}$/.test(v);
+}
+
+function isValidPassword(v) {
+    if (!v || typeof v !== 'string') return false;
+    if (v.length < 6) return false;
+    const latin = (v.match(/[A-Za-z]/g) || []).length;
+    const digits = (v.match(/\d/g) || []).length;
+    return latin >= 4 && digits >= 2;
+}
+
+function isValidAddress(v) {
+    if (!v || typeof v !== 'string') return false;
+    return v.trim().length >= 1;
+}
 
 // === MIGRATIONS: sku + specs (auto) ===
 try { db.exec('ALTER TABLE products ADD COLUMN sku TEXT'); } catch(e){}
@@ -369,6 +415,11 @@ function adminMiddleware(req, res, next) {
    ============================================================ */
 app.post('/api/register', (req, res) => {
     const { name, email, password } = req.body;
+    // ===== Валидация =====
+    if (!isValidName(name)) return res.status(400).json({ error: 'Имя должно содержать только буквы, пробел или дефис (2-50 символов)' });
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'Некорректный email' });
+    if (!isValidPassword(password)) return res.status(400).json({ error: 'Пароль должен содержать минимум 4 латинские буквы и 2 цифры (не короче 6 символов)' });
+    // ======================
     if (!name || !email || !password) return res.status(400).json({ error: 'Заполните все поля' });
     if (password.length < 6) return res.status(400).json({ error: 'Пароль минимум 6 символов' });
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
@@ -383,6 +434,9 @@ app.post('/api/register', (req, res) => {
 
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
+    // ===== Валидация =====
+    if (!email || typeof email !== 'string' || email.trim().length < 1) return res.status(400).json({ error: 'Укажите email или логин' });
+    // ======================
     if (!email || !password) return res.status(400).json({ error: 'Заполните все поля' });
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (!user || !bcrypt.compareSync(password, user.password)) {
@@ -584,7 +638,7 @@ app.post('/api/products', authMiddleware, adminMiddleware, (req, res) => {
     const { name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, badge_ids, stock_by_size } = req.body;
     if (!name || !price) return res.status(400).json({ error: 'Название и цена обязательны' });
     if (!images || !images.length) return res.status(400).json({ error: 'Добавьте фото' });
-    const r = db.prepare('INSERT INTO products (name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const r = db.prepare('INSERT INTO products (name, price, description, sizes, images, brand_id, category_id, discount, stock, stock_status, stock_by_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
                 .run(name, price, description || '', JSON.stringify(sizes || ['ONE SIZE']), JSON.stringify(images), brand_id || null, category_id || null, discount || 0, stock || 0, stock_status || 'in_stock', JSON.stringify(stock_by_size || {}));
     const newId = r.lastInsertRowid;
     try { if (badge_ids && badge_ids.length) { const stmt = db.prepare('INSERT OR IGNORE INTO product_badges (product_id, badge_id) VALUES (?, ?)'); for (const bid of badge_ids) stmt.run(newId, bid); } } catch (e) { console.error('badges insert:', e.message); }
@@ -831,6 +885,10 @@ app.delete('/api/slides/:id', authMiddleware, adminMiddleware, (req, res) => {
    ============================================================ */
 app.post('/api/orders', authMiddleware, (req, res) => {
     const { customer_name, phone, address, comment, items, total, payment_method, payment_status, is_reserved, stock_eta } = req.body;
+    // ===== Валидация =====
+    if (phone && !isValidPhoneRU(phone)) return res.status(400).json({ error: 'Некорректный номер телефона. Формат: +7 (900) 123-45-67' });
+    if (!address || !isValidAddress(address)) return res.status(400).json({ error: 'Укажите адрес доставки' });
+    // ======================
     if (!customer_name || !phone || !address) return res.status(400).json({ error: 'Заполните имя, телефон и адрес' });
     if (!items || !items.length) return res.status(400).json({ error: 'Корзина пуста' });
     // Обогащаем каждый item картинкой и брендом из products
@@ -934,6 +992,39 @@ app.post('/api/payment/create', authMiddleware, async (req, res) => {
   const { items, total, payment_method, phone, address, comment } = req.body;
   if (!items || !items.length) return res.status(400).json({ error: "Корзина пуста" });
   if (!phone || !address) return res.status(400).json({ error: "Заполните телефон и адрес" });
+  if (!isValidPhoneRU(phone)) return res.status(400).json({ error: "Некорректный номер телефона. Формат: +7 (900) 123-45-67" });
+  if (!isValidAddress(address)) return res.status(400).json({ error: "Некорректный адрес доставки" });
+
+  /* ===== Проверка остатков на складе ===== */
+  for (const it of items) {
+    const qty = parseInt(it.qty || 1, 10);
+    if (qty < 1) return res.status(400).json({ error: "Некорректное количество" });
+
+    const prod = db.prepare('SELECT id, name, stock, stock_by_size FROM products WHERE id = ?').get(it.id);
+    if (!prod) return res.status(400).json({ error: "Товар «" + (it.name || 'id ' + it.id) + "» не найден" });
+
+    let available;
+    if (it.size) {
+      let sbs = {};
+      try { sbs = JSON.parse(prod.stock_by_size || '{}'); } catch (e) { sbs = {}; }
+      if (sbs[it.size] === undefined) {
+        // Размер есть в заказе, но нет в stock_by_size — берём общий stock
+        available = prod.stock || 0;
+      } else {
+        available = parseInt(sbs[it.size], 10) || 0;
+      }
+    } else {
+      available = prod.stock || 0;
+    }
+
+    if (available < qty) {
+      const sizeTxt = it.size ? ' размера ' + it.size : '';
+      return res.status(400).json({
+        error: 'Товара «' + prod.name + '»' + sizeTxt + ' недостаточно. В наличии: ' + available + ', в заказе: ' + qty
+      });
+    }
+  }
+  /* ===== Конец проверки ===== */
   if (payment_method === "cash") {
     const r = db.prepare("INSERT INTO orders (user_id, phone, address, comment, items, total, status, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(req.user.id, phone, address, comment || "", JSON.stringify(items), total || 0, "new", "cash");
     decrementStock(r.lastInsertRowid);

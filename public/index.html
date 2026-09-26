@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vamp Shmot</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -53,6 +54,24 @@
         <img src="img/vamp.png" alt="Logo">
     </div>
 
+    <div class="header-icons">
+        <a class="fav-icon" id="fav-icon" onclick="showFavorites()" aria-label="Избранное">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            <span class="fav-count" id="fav-count">0</span>
+        </a>
+        <button type="button" class="search-toggle" id="search-toggle" aria-label="Поиск">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+        </button>
+        <div class="cart-icon" onclick="showCart()">🛒<span class="cart-count" id="cart-count">0</span></div>
+    </div>
+
+    <div id="user-area"></div>
+
     <nav class="main-nav">
         <ul>
             <li><a onclick="showCatalog()">Каталог</a></li>
@@ -60,11 +79,6 @@
             <li><a onclick="showContacts()">Контакты</a></li>
         </ul>
     </nav>
-
-    <div class="header-right">
-        <div id="user-area"></div>
-        <div class="cart-icon" onclick="showCart()">🛒<span class="cart-count" id="cart-count">0</span></div>
-    </div>
 </header>
 
 <!-- ГЛАВНАЯ -->
@@ -110,6 +124,18 @@
 
         <div class="grid" id="product-grid"></div>
     </section>
+
+<!-- ИЗБРАННОЕ -->
+<section class="fav-page" id="fav-view">
+    <div class="back-btn" onclick="showCatalog()">← Назад в каталог</div>
+    <h2 class="fav-page__title">Избранное</h2>
+    <div class="fav-page__empty" id="fav-empty" style="display:none;">
+        Пока ничего не добавлено ⭐<br><br>
+        <button class="btn" onclick="showCatalog()">Перейти в каталог</button>
+    </div>
+    <div class="grid" id="fav-grid"></div>
+</section>
+
 </main>
 
 <!-- СТРАНИЦА ТОВАРА -->
@@ -170,7 +196,15 @@
                     <button onclick="changeQty(1)">+</button>
                 </div>
             </div>
+            <button type="button" id="fav-btn" onclick="toggleFavorite()" aria-label="В избранное"
+    style="display:flex;flex-direction:row;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;padding:14px 20px;margin:10px 0 0;background:#fff;color:#111;border:1px solid #111;border-radius:0;font-family:inherit;font-size:14px;font-weight:normal;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;box-sizing:border-box;text-align:center;">
+    <svg id="fav-btn-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display:block;flex:0 0 22px;margin:0;">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+    </svg>
+    <span id="fav-btn-label" style="display:inline-block;line-height:1;color:#111;font:inherit;margin:0;padding:0;">В избранное</span>
+</button>
             <button class="add-to-cart-btn" onclick="addCurrentToCart()">Добавить в корзину</button>
+            <button class="go-to-checkout-btn" onclick="goToCheckout()">Перейти к заказу →</button>
             <button class="reserve-btn" onclick="reserveCurrentProduct()">Забронировать</button>
         </div>
     </div>
@@ -353,14 +387,14 @@
             </div>
             <div class="form-group">
                 <label>Логотип (файл)</label>
-                <div class="upload-zone" id="brand-upload-zone" style="min-height:120px;">
+                <label for="brand-file" class="upload-zone" id="brand-upload-zone" style="cursor:pointer;min-height:120px;">
                     <div id="brand-upload-placeholder">
                         <div style="font-size:24px;">🏷️</div>
                         <div>Нажмите или перетащите логотип</div>
                     </div>
-                    <img id="brand-upload-preview" style="display:none; max-height:120px;" alt="">
-                </div>
-                <input type="file" id="brand-logo-file" accept="image/*" style="display:none;">
+                    <img id="brand-upload-preview" style="max-height:120px; margin:8px auto; display:none;" alt="">
+                </label>
+                <input type="file" id="brand-file" accept="image/*" style="display:none;">
                 <div class="form-group" style="margin-top:10px;"><label>или URL логотипа</label><input type="text" id="b-logo-url"></div>
             </div>
             <button class="btn" onclick="saveBrand()">Добавить бренд</button>
@@ -410,7 +444,7 @@
                 <label>Добавить слайд</label>
                 <div class="upload-zone" id="slide-upload-zone" style="min-height:150px;">
                     <div id="slide-upload-placeholder"><div style="font-size:28px;">🖼️</div><div>Нажмите или перетащите фото</div></div>
-                    <img id="slide-upload-preview" style="display:none; max-height:200px;" alt="">
+                    <img id="slide-upload-preview" style="max-height:150px; margin:8px auto; display:none;" alt="">
                 </div>
                 <input type="file" id="slide-file" accept="image/*" style="display:none;">
             </div>
@@ -616,6 +650,7 @@
 </div>
 
 <script src="script.js"></script>
+<script src="script-fix-double.js"></script>
 
 <!-- === BURGER FILTERS (start) === -->
 <button class="burger" id="burgerBtn" aria-label="Фильтры" aria-expanded="false">
@@ -653,6 +688,47 @@
   </button>
 </div>
 <!-- === BURGER FILTERS (end) === -->
+
+
+<!-- ПОИСК -->
+<div class="search-overlay" id="search-overlay">
+    <div class="search-modal">
+        <div class="search-modal__head">
+            <div class="search-input-wrap">
+                <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="search" id="search-input" placeholder="Что искать?" autocomplete="off" enterkeyhint="search">
+                <button type="button" class="search-close" id="search-close" aria-label="Закрыть">✕</button>
+            </div>
+        </div>
+
+        <div class="search-modal__body" id="search-body">
+            <!-- История поиска -->
+            <div class="search-section" id="search-history-section">
+                <div class="search-section__head">
+                    <span>История поиска</span>
+                    <button type="button" class="search-clear-history" id="search-clear-history">Очистить</button>
+                </div>
+                <div class="search-history" id="search-history"></div>
+            </div>
+
+            <!-- Подсказки -->
+            <div class="search-section" id="search-suggests-section" style="display:none;">
+                <div class="search-section__head">
+                    <span>Найдено</span>
+                </div>
+                <div class="search-suggests" id="search-suggests"></div>
+            </div>
+
+            <!-- Пустой результат -->
+            <div class="search-empty" id="search-empty" style="display:none;">
+                Ничего не найдено
+            </div>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>

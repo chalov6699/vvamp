@@ -3,28 +3,64 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
-# Бэкапы
-.backup_*
-*.bak_*
-*.broken
+# Секреты
+.env
+.env.*
+!.env.example
+
+# БД (включая бэкапы)
+database.db
+database.db-journal
+database.db.*
+database.db.before-*
+
+# Загрузки
+uploads/
+
+# Логи
+*.log
 
 # ОС
 .DS_Store
 Thumbs.db
 
-# Приватное — не заливать в Git
-database.db
-database.db-journal
-.env
-uploads/
-*.log
-.env
-.env
-database.db
-database.db.bak*
-uploads/
+# Бэкапы и снимки
 *.bak
 *.bak-*
+*.bak2
+*.backup-*
+*.backup_*
 *.manual_bak
+*.before-*
+*.pre-*
 *.snapshot-*
 vamp4.snapshot-*
+*.broken
+
+# Промежуточные скрипты (оставляем только рабочий v50)
+public/script-v[0-9].js
+public/script-v[0-9][0-9].js
+public/script-fav.js
+public/script2.js
+public/script-new.js
+public/script-upload-dedup.js
+public/script-fix-double.js
+public/script.js.before-*
+public/script.js
+public/_old_scripts/
+
+# Промежуточные CSS/HTML
+public/style.css.before-*
+public/index.html.before-*
+
+# Промежуточные server.js
+server.js.before-*
+
+# Промежуточные скрипты (архив)
+public/_old_scripts/
+public/script-v*.js
+public/script-fav.js
+public/script2.js
+public/script-new.js
+public/script-upload-dedup.js
+public/script-fix-double.js
